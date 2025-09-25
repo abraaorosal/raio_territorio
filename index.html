@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPRAIO - Distribuição Territorial</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background: #f5f5f5; }
+        .container { display: flex; height: 100vh; transition: all 0.3s ease; }
+        .sidebar { width: 350px; max-width: 90vw; background: white; box-shadow: 2px 0 12px rgba(0,0,0,0.12); padding: 0; overflow: hidden; transition: width 0.3s ease, box-shadow 0.3s ease; display: flex; flex-direction: column; }
+        .sidebar-content { padding: 20px; overflow-y: auto; height: 100%; transition: opacity 0.2s ease, transform 0.2s ease; }
+        #appLayout.sidebar-collapsed .sidebar { width: 0; box-shadow: none; }
+        #appLayout.sidebar-collapsed .sidebar-content { opacity: 0; transform: translateX(-12px); pointer-events: none; }
+        .map-container { flex: 1; position: relative; background: #eef3f8; }
+        #map { height: 100%; width: 100%; }
+        .control-panel { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .color-group { display: flex; align-items: center; margin-bottom: 10px; padding: 8px; border-radius: 5px; background: white; }
+        .color-picker { width: 40px; height: 30px; border: none; border-radius: 4px; cursor: pointer; }
+        .legend { position: absolute; bottom: 20px; left: 20px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: 1000; }
+        .status { position: absolute; top: 20px; right: 20px; background: #4caf50; color: white; padding: 10px 15px; border-radius: 5px; z-index: 1000; display: none; }
+        .header { background: #0f4ea8; color: white; padding: 14px 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); display: flex; align-items: center; justify-content: space-between; }
+        .header-left { display: flex; align-items: center; gap: 14px; }
+        .header h1 { margin: 0; font-size: 22px; font-weight: 600; }
+        .logo { width: 56px; height: 56px; border-radius: 50%; object-fit: contain; }
+        .hamburger { background: rgba(255,255,255,0.15); border: none; color: white; width: 46px; height: 46px; border-radius: 12px; font-size: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.25s ease; }
+        .hamburger:hover { background: rgba(255,255,255,0.25); }
+        .hamburger.active { background: rgba(0,0,0,0.25); }
+        @media (max-width: 900px) {
+            .header h1 { font-size: 18px; }
+            .logo { width: 48px; height: 48px; }
+        }
+        @media (max-width: 720px) {
+            .container { flex-direction: column; height: auto; }
+            .sidebar { width: 100%; max-width: 100%; box-shadow: none; border-radius: 0; }
+            #appLayout.sidebar-collapsed .sidebar { width: 0; }
+            .map-container { min-height: 60vh; }
+        }
+        .section-title { display: flex; align-items: center; gap: 10px; margin: 0 0 12px 0; font-size: 18px; }
+        .icon-raio { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .edit-mode { background: #ff9800; color: white; padding: 8px 15px; border-radius: 5px; cursor: pointer; border: none; margin: 5px; }
+        .edit-mode.active { background: #f44336; }
+        .download-btn { background: #4caf50; color: white; padding: 8px 15px; border-radius: 5px; cursor: pointer; border: none; margin: 5px; }
+        .municipality-list { max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin-top: 10px; }
+        .municipality-item { padding: 5px; border-bottom: 1px solid #eee; cursor: pointer; }
+        .municipality-item:hover { background: #f0f0f0; }
+        .remove-btn { background: #f44336; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; float: right; }
+        .hint { display: block; font-size: 13px; color: #555; margin-top: 8px; line-height: 1.4; }
+        .battalion-marker { font-size: 22px; line-height: 22px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <button class="hamburger" id="sidebarToggle" aria-label="Alternar menu">☰</button>
+            <img src="assets/logo_raio.png" class="logo" alt="Logo CPRAIO">
+            <h1>CPRAIO - Distribuição Territorial</h1>
+        </div>
+    </div>
+    <div class="container" id="appLayout">
+        <div class="sidebar">
+            <div class="sidebar-content">
+                <div class="control-panel">
+                    <h3 class="section-title"><img src="assets/logo_raio.png" class="icon-raio" alt="">Batalhões RAIO</h3>
+                    <div class="color-group"><label>1º BPRAIO:</label><input type="color" class="color-picker" id="color1" value="#e41a1c"></div>
+                    <div class="color-group"><label>2º BPRAIO:</label><input type="color" class="color-picker" id="color2" value="#377eb8"></div>
+                    <div class="color-group"><label>3º BPRAIO:</label><input type="color" class="color-picker" id="color3" value="#4daf4a"></div>
+                    <div class="color-group"><label>4º BPRAIO:</label><input type="color" class="color-picker" id="color4" value="#984ea3"></div>
+                    <div class="color-group"><label>5º BPRAIO:</label><input type="color" class="color-picker" id="color5" value="#ff7f00"></div>
+                </div>
+
+                <div class="control-panel">
+                    <h3 class="section-title"><img src="assets/logo_raio.png" class="icon-raio" alt="">Distribuição RAIO no Terreno</h3>
+                    <span class="hint">Clique no mapa para pintar o município com o grupo ativo. Use o modo edição para remover uma cor.</span>
+
+                    <label for="activeGroup" style="margin-top: 12px; display: block;">Batalhão Ativo:</label>
+                    <select id="activeGroup"><option value="1">1º BPRAIO</option><option value="2">2º BPRAIO</option><option value="3">3º BPRAIO</option><option value="4">4º BPRAIO</option><option value="5">5º BPRAIO</option></select>
+
+                    <button class="download-btn" onclick="downloadMapPDF()">📄 Baixar Mapa em PDF</button>
+                    <button class="edit-mode" id="editModeBtn" onclick="toggleEditMode()">✏️ Modo Edição</button>
+                </div>
+
+                <div class="control-panel">
+                    <h4>📊 Estatísticas</h4>
+                    <div id="statsContent">Nenhum município pintado</div>
+                </div>
+
+                <div class="control-panel" id="editPanel" style="display: none;">
+                    <h4>✏️ Editar Municípios Pintados</h4>
+                    <div class="municipality-list" id="municipalityList">
+                        <div style="text-align: center; color: #666; padding: 20px;">Nenhum município pintado</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="map-container">
+            <div id="map"></div>
+            <div class="legend">
+                <h4>Legenda</h4>
+                <div id="legendContent"></div>
+            </div>
+            <div class="status" id="status"></div>
+        </div>
+    </div>
+    
+        <script>
+        let map,
+            municipalities = {},
+            municipalityIndex = {},
+            assignments = {},
+            battalions = {},
+            battalionMarkers = {},
+            activeGroup = 1,
+            editMode = false;
+
+        const lockedMunicipalities = new Set();
+
+        const STORAGE_KEYS = {
+            assignments: 'cpraio:assignments',
+            colors: 'cpraio:colors'
+        };
+
+        let cachedStorage;
+        function getStorage() {
+            if (cachedStorage !== undefined) return cachedStorage;
+            try {
+                const storage = window.localStorage;
+                const testKey = 'cpraio:test';
+                storage.setItem(testKey, '1');
+                storage.removeItem(testKey);
+                cachedStorage = storage;
+            } catch (error) {
+                console.warn('Armazenamento local indisponível:', error);
+                cachedStorage = null;
+            }
+            return cachedStorage;
+        }
+
+        function persistState() {
+            const storage = getStorage();
+            if (!storage) return;
+
+            try {
+                const dynamicAssignments = {};
+                Object.entries(assignments).forEach(([name, group]) => {
+                    if (!lockedMunicipalities.has(name)) {
+                        dynamicAssignments[name] = group;
+                    }
+                });
+                storage.setItem(STORAGE_KEYS.assignments, JSON.stringify(dynamicAssignments));
+            } catch (error) {
+                console.warn('Não foi possível salvar atribuições:', error);
+            }
+
+            try {
+                const colors = {};
+                for (let i = 1; i <= 5; i++) {
+                    const input = document.getElementById(`color${i}`);
+                    if (input) colors[i] = input.value;
+                }
+                storage.setItem(STORAGE_KEYS.colors, JSON.stringify(colors));
+            } catch (error) {
+                console.warn('Não foi possível salvar paleta de cores:', error);
+            }
+        }
+
+        const BATTALION_ICONS = {
+            star: '⭐',
+            shield: '🛡️',
+            flag: '🚩',
+            info: 'ℹ️'
+        };
+
+        const FIXED_BATTALIONS = [
+            { municipality: 'Fortaleza', label: '1º BPRAIO (Fortaleza)', icon: 'shield', group: 1 },
+            { municipality: 'Caucaia', label: '2º BPRAIO (Caucaia)', icon: 'shield', group: 2 },
+            { municipality: 'Russas', label: '3º BPRAIO (Russas)', icon: 'shield', group: 3 },
+            { municipality: 'Sobral', label: '4º BPRAIO (Sobral)', icon: 'shield', group: 4 },
+            { municipality: 'Juazeiro Do Norte', label: '5º BPRAIO (Juazeiro do Norte)', icon: 'shield', group: 5 }
+        ];
+
+        const INITIAL_ASSIGNMENTS = {
+            1: ['Fortaleza'],
+            2: [
+                'Caucaia', 'Maracanaú', 'Eusébio', 'Horizonte', 'São Gonçalo Do Amarante',
+                'Maranguape', 'Aquiraz', 'Pacajus', 'Trairi', 'Pacatuba', 'Cascavel', 'Itaitinga',
+                'Paracuru', 'Guaiúba', 'Chorozinho', 'Paraipaba', 'Redenção', 'Aracoiaba'
+            ],
+            3: [
+                'Russas', 'Aracati', 'Quixadá', 'Limoeiro Do Norte', 'Beberibe', 'Quixeramobim',
+                'Morada Nova', 'Jaguaruana', 'Baturité', 'Jaguaribe', 'Icapuí', 'Boa Viagem',
+                'Tabuleiro Do Norte', 'Pedra Branca', 'Ocara', 'Senador Pompeu'
+            ],
+            4: [
+                'Sobral', 'Tianguá', 'Canindé', 'Camocim', 'Itapipoca', 'Massapê',
+                'Viçosa Do Ceará', 'Santa Quitéria', 'Granja', 'Itapajé', 'Santana Do Acaraú',
+                'São Benedito', 'Bela Cruz', 'Acaraú', 'Marco', 'Itarema', 'Forquilha',
+                'Guaraciaba Do Norte', 'Ipu', 'Amontada', 'Pentecoste', 'Ubajara', 'Ibiapina', 'Cruz'
+            ],
+            5: [
+                'Juazeiro Do Norte', 'Iguatu', 'Tauá', 'Crateús', 'Brejo Santo', 'Crato',
+                'Acopiara', 'Parambu', 'Tamboril', 'Mauriti', 'Barbalha', 'Icó', 'Mombaça',
+                'Nova Russas', 'Jardim', 'Várzea Alegre', 'Lavras Da Mangabeira', 'Novo Oriente',
+                'Ipueiras', 'Aurora', 'Missão Velha', 'Campos Sales', 'Cariús', 'Cedro',
+                'Independência', 'Milagres'
+            ]
+        };
+
+        function geometryBounds(geometry) {
+            if (!geometry || !geometry.coordinates) return null;
+
+            let minLat = Infinity, minLng = Infinity, maxLat = -Infinity, maxLng = -Infinity;
+
+            const traverse = coords => {
+                if (!coords) return;
+                if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+                    const [lng, lat] = coords;
+                    if (lat < minLat) minLat = lat;
+                    if (lng < minLng) minLng = lng;
+                    if (lat > maxLat) maxLat = lat;
+                    if (lng > maxLng) maxLng = lng;
+                } else if (Array.isArray(coords)) {
+                    coords.forEach(traverse);
+                }
+            };
+
+            traverse(geometry.coordinates);
+
+            if (!Number.isFinite(minLat) || !Number.isFinite(minLng)) return null;
+            return { minLat, minLng, maxLat, maxLng };
+        }
+
+        function featureCenter(feature) {
+            const bounds = geometryBounds(feature?.geometry);
+            if (!bounds) return null;
+            return [
+                (bounds.minLat + bounds.maxLat) / 2,
+                (bounds.minLng + bounds.maxLng) / 2
+            ];
+        }
+
+        function resolveMunicipalityName(name) {
+            if (!name) return null;
+            if (municipalities[name]) return name;
+            const normalized = municipalityIndex[name.toLowerCase()];
+            return normalized || null;
+        }
+
+        function hexToRgb(hex) {
+            if (!hex) return [0, 0, 0];
+            let normalized = hex.replace('#', '');
+            if (normalized.length === 3) {
+                normalized = normalized.split('').map(ch => ch + ch).join('');
+            }
+            const value = parseInt(normalized, 16);
+            if (Number.isNaN(value)) return [0, 0, 0];
+            return [
+                (value >> 16) & 255,
+                (value >> 8) & 255,
+                value & 255
+            ];
+        }
+
+        function formatBattalionLabel(group) {
+            const n = Number(group);
+            if (!Number.isFinite(n)) return `${group}º BPRAIO`;
+            return `${n}º BPRAIO`;
+        }
+
+        function restoreState() {
+            const storage = getStorage();
+            if (!storage) return;
+
+            let assignmentsChanged = false;
+            try {
+                const saved = storage.getItem(STORAGE_KEYS.assignments);
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (parsed && typeof parsed === 'object') {
+                        Object.entries(parsed).forEach(([name, group]) => {
+                            const resolved = resolveMunicipalityName(name);
+                            const numericGroup = Number(group);
+                            if (!resolved) return;
+                            if (!Number.isFinite(numericGroup)) return;
+                            if (lockedMunicipalities.has(resolved)) return;
+                            assignments[resolved] = numericGroup;
+                            assignmentsChanged = true;
+                        });
+                    }
+                }
+            } catch (error) {
+                console.warn('Não foi possível restaurar atribuições salvas:', error);
+            }
+
+            let colorsChanged = false;
+            try {
+                const savedColors = storage.getItem(STORAGE_KEYS.colors);
+                if (savedColors) {
+                    const parsedColors = JSON.parse(savedColors);
+                    if (parsedColors && typeof parsedColors === 'object') {
+                        for (let i = 1; i <= 5; i++) {
+                            if (parsedColors[i]) {
+                                const input = document.getElementById(`color${i}`);
+                                if (input && input.value !== parsedColors[i]) {
+                                    input.value = parsedColors[i];
+                                    colorsChanged = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.warn('Não foi possível restaurar cores salvas:', error);
+            }
+
+            if (colorsChanged) {
+                updateLegend();
+            }
+
+            if (assignmentsChanged || colorsChanged) {
+                updatePaintedMunicipalities();
+                updateStats();
+                updateMunicipalityList();
+            }
+        }
+
+        async function loadImageDataURL(url) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`Status ${response.status}`);
+                const blob = await response.blob();
+                return await new Promise(resolve => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.readAsDataURL(blob);
+                });
+            } catch (error) {
+                console.warn(`Não foi possível carregar imagem: ${url}`, error);
+                return null;
+            }
+        }
+        
+        function initMap() {
+            map = L.map('map').setView([-5.2, -39.5], 7);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap',
+                crossOrigin: true
+            }).addTo(map);
+            loadMunicipalities();
+            setupEventListeners();
+            updateLegend();
+        }
+        
+        async function loadMunicipalities() {
+            try {
+                const response = await fetch('data/ceara_municipios.geojson');
+                const data = await response.json();
+                
+                data.features.forEach(feature => {
+                    const name = feature.properties.name_muni || feature.properties.NM_MUN || feature.properties.NM_MUNICIP || feature.properties.municipio || feature.properties.name;
+                    if (name) {
+                        municipalities[name] = feature;
+                        municipalityIndex[name.toLowerCase()] = name;
+                    }
+                });
+                
+                L.geoJSON(data, {
+                    style: {fillColor: '#bbbbbb40', color: '#666666', weight: 0.6, fillOpacity: 0.2},
+                    onEachFeature: function(feature, layer) {
+                        const name = feature.properties.name_muni || feature.properties.NM_MUN || feature.properties.NM_MUNICIP || feature.properties.municipio || feature.properties.name;
+                        if (name) {
+                            layer.bindTooltip(name, {permanent: false, direction: 'center'});
+                            layer.on('click', function() { handleMunicipalityClick(name); });
+                        }
+                    }
+                }).addTo(map);
+
+                initializeFixedBattalions();
+                applyInitialAssignments();
+                restoreState();
+            } catch (error) {
+                console.error('Erro ao carregar municípios:', error);
+                showStatus('Erro ao carregar dados', 'error');
+            }
+        }
+
+        function initializeFixedBattalions() {
+            let added = 0;
+            let painted = 0;
+
+            FIXED_BATTALIONS.forEach(def => {
+                const resolvedName = resolveMunicipalityName(def.municipality);
+                if (!resolvedName) {
+                    console.warn(`Município não encontrado para batalhão fixo: ${def.municipality}`);
+                    return;
+                }
+
+                const feature = municipalities[resolvedName];
+                if (!feature) {
+                    console.warn(`Município não encontrado para batalhão fixo: ${def.municipality}`);
+                    return;
+                }
+
+                const center = featureCenter(feature);
+                if (!center) {
+                    console.warn(`Não foi possível calcular o centro de ${def.municipality}`);
+                    return;
+                }
+
+                const previous = battalions[resolvedName];
+                if (previous && previous.fileUrl) {
+                    URL.revokeObjectURL(previous.fileUrl);
+                }
+
+                battalions[resolvedName] = {
+                    latlng: center,
+                    icon: def.icon || 'shield',
+                    fileName: null,
+                    fileUrl: null,
+                    displayName: def.label
+                };
+
+                addBattalionMarker(resolvedName);
+                added += 1;
+                lockedMunicipalities.add(resolvedName);
+
+                if (Number.isInteger(def.group)) {
+                    assignments[resolvedName] = def.group;
+                    painted += 1;
+                }
+            });
+
+            if (added > 0) {
+                updatePaintedMunicipalities();
+                updateStats();
+                updateMunicipalityList();
+                showStatus(painted === added ? 'BPRAIOs pré-coloridos e carregados automaticamente.' : 'BPRAIOs carregados automaticamente.');
+            }
+        }
+
+        function applyInitialAssignments() {
+            let newAssignments = 0;
+            Object.entries(INITIAL_ASSIGNMENTS).forEach(([group, names]) => {
+                const uniqueNames = Array.from(new Set(names));
+                uniqueNames.forEach(name => {
+                    const resolved = resolveMunicipalityName(name);
+                    if (!resolved) {
+                        console.warn(`Município não encontrado para pré-coloração: ${name}`);
+                        return;
+                    }
+                    const numericGroup = Number(group);
+                    if (assignments[resolved] === numericGroup) return;
+                    assignments[resolved] = numericGroup;
+                    lockedMunicipalities.add(resolved);
+                    newAssignments += 1;
+                });
+            });
+
+            if (newAssignments > 0) {
+                updatePaintedMunicipalities();
+                updateStats();
+                updateMunicipalityList();
+                showStatus('Municípios dos BPRAIOs pré-coloridos automaticamente.');
+            }
+        }
+
+        function setupEventListeners() {
+            document.getElementById('activeGroup').addEventListener('change', e => activeGroup = parseInt(e.target.value));
+            for (let i = 1; i <= 5; i++) {
+                document.getElementById(`color${i}`).addEventListener('change', () => {
+                    updateLegend();
+                    updatePaintedMunicipalities();
+                    persistState();
+                });
+            }
+
+            const toggle = document.getElementById('sidebarToggle');
+            const layout = document.getElementById('appLayout');
+            if (toggle) {
+                toggle.innerHTML = '☰';
+                const setButtonState = collapsed => {
+                    toggle.classList.toggle('active', !collapsed);
+                    toggle.setAttribute('aria-expanded', (!collapsed).toString());
+                    toggle.setAttribute('aria-label', collapsed ? 'Abrir menu lateral' : 'Fechar menu lateral');
+                };
+
+                const initialCollapsed = window.innerWidth <= 900;
+                if (initialCollapsed && layout) {
+                    layout.classList.add('sidebar-collapsed');
+                    setTimeout(() => { if (map && typeof map.invalidateSize === 'function') map.invalidateSize(); }, 60);
+                }
+                setButtonState(initialCollapsed);
+
+                toggle.addEventListener('click', () => {
+                    if (!layout) return;
+                    const collapsedNow = layout.classList.toggle('sidebar-collapsed');
+                    setButtonState(collapsedNow);
+                    setTimeout(() => { if (map && typeof map.invalidateSize === 'function') map.invalidateSize(); }, 320);
+                });
+            }
+        }
+        
+        function handleMunicipalityClick(name) {
+            if (editMode) {
+                removeMunicipality(name);
+                return;
+            }
+            paintMunicipality(name, activeGroup);
+        }
+        
+        function paintMunicipality(name, group) {
+            assignments[name] = group;
+            updatePaintedMunicipalities();
+            updateStats();
+            updateMunicipalityList();
+            showStatus(`${name} pintado com ${formatBattalionLabel(group)}`);
+            persistState();
+        }
+        
+        function addBattalionMarker(name) {
+            if (!battalions[name]) return;
+
+            if (battalionMarkers[name]) {
+                map.removeLayer(battalionMarkers[name]);
+            }
+
+            const data = battalions[name];
+            const iconHtml = BATTALION_ICONS[data.icon] || '🏛️';
+            const marker = L.marker(data.latlng, {
+                icon: L.divIcon({className: 'battalion-marker', html: iconHtml, iconSize: [30, 30]})
+            }).addTo(map);
+
+            const fileInfo = data.fileName && data.fileUrl
+                ? `<br/>Arquivo: <a href="${data.fileUrl}" download="${data.fileName}">${data.fileName}</a>`
+                : '';
+            const label = data.displayName || name;
+            marker.bindPopup(`<b>Batalhão:</b> ${label}${fileInfo}`);
+            battalionMarkers[name] = marker;
+        }
+
+        function updatePaintedMunicipalities() {
+            map.eachLayer(layer => { if (layer.options && layer.options.isPainted) map.removeLayer(layer); });
+            Object.entries(assignments).forEach(([name, group]) => {
+                const feature = municipalities[name];
+                if (feature) {
+                    const color = document.getElementById(`color${group}`).value;
+                    const paintedLayer = L.geoJSON(feature, {
+                        style: {fillColor: color, color: color, weight: 1.2, fillOpacity: 0.7},
+                        interactive: false
+                    });
+                    paintedLayer.options.isPainted = true;
+                    paintedLayer.addTo(map);
+                }
+            });
+        }
+        
+        function updateLegend() {
+            const legendContent = document.getElementById('legendContent');
+            legendContent.innerHTML = '';
+            for (let i = 1; i <= 5; i++) {
+                const color = document.getElementById(`color${i}`).value;
+                const div = document.createElement('div');
+                div.innerHTML = `<div style="display:inline-block;width:15px;height:15px;background:${color};margin-right:5px;"></div>${formatBattalionLabel(i)}`;
+                legendContent.appendChild(div);
+            }
+        }
+        
+        function updateStats() {
+            const statsContent = document.getElementById('statsContent');
+            let html = '';
+            const groupStats = {};
+            Object.entries(assignments).forEach(([name, group]) => {
+                if (!groupStats[group]) groupStats[group] = [];
+                groupStats[group].push(name);
+            });
+            Object.entries(groupStats).forEach(([group, muns]) => {
+                html += `<div><strong>${formatBattalionLabel(group)}:</strong> ${muns.length} ${muns.length === 1 ? 'município' : 'municípios'}</div>`;
+            });
+            const battalionEntries = Object.entries(battalions);
+            if (battalionEntries.length > 0) {
+                html += `<div><strong>Batalhões:</strong> ${battalionEntries.length} marcados</div>`;
+                const names = battalionEntries
+                    .map(([, data]) => data.displayName || '')
+                    .filter(Boolean);
+                if (names.length > 0) {
+                    html += `<div style="margin-left: 10px; font-size: 13px; color: #333;">${names.join(', ')}</div>`;
+                }
+            }
+            statsContent.innerHTML = html || 'Nenhum município pintado';
+        }
+
+        function showStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.style.background = type === 'error' ? '#f44336' : '#4caf50';
+            status.style.display = 'block';
+            setTimeout(() => status.style.display = 'none', 3000);
+        }
+        
+        function toggleEditMode() {
+            editMode = !editMode;
+            const btn = document.getElementById('editModeBtn');
+            const panel = document.getElementById('editPanel');
+            
+            if (editMode) {
+                btn.textContent = '❌ Sair da Edição';
+                btn.classList.add('active');
+                panel.style.display = 'block';
+                updateMunicipalityList();
+            } else {
+                btn.textContent = '✏️ Modo Edição';
+                btn.classList.remove('active');
+                panel.style.display = 'none';
+            }
+        }
+        
+        function removeMunicipality(name) {
+            if (lockedMunicipalities.has(name)) {
+                showStatus(`${name} não pode ser removido.`, 'error');
+                return;
+            }
+            if (assignments[name]) {
+                delete assignments[name];
+                updatePaintedMunicipalities();
+                updateStats();
+                updateMunicipalityList();
+                showStatus(`${name} removido do mapa`);
+                persistState();
+            }
+        }
+        
+        function updateMunicipalityList() {
+            const list = document.getElementById('municipalityList');
+            const entries = Object.entries(assignments);
+            
+            if (entries.length === 0) {
+                list.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">Nenhum município pintado</div>';
+                return;
+            }
+            
+            list.innerHTML = entries.map(([name, group]) => {
+                const locked = lockedMunicipalities.has(name);
+                const removeButton = locked
+                    ? '<span style="float: right; color: #999; font-size: 12px;">fixo</span>'
+                    : `<button class="remove-btn" onclick="removeMunicipality('${name}')">×</button>`;
+                return `
+                <div class="municipality-item">
+                    <span style="display: inline-block; width: 15px; height: 15px; background: ${document.getElementById(`color${group}`).value}; margin-right: 8px; border-radius: 2px;"></span>
+                    ${name} (${formatBattalionLabel(group)})
+                    ${removeButton}
+                </div>
+                `;
+            }).join('');
+        }
+        
+        async function downloadMapPDF() {
+            const jsPDF = window.jspdf?.jsPDF;
+            if (!jsPDF) {
+                console.error('jsPDF não encontrado.');
+                showStatus('Biblioteca de PDF não carregada.', 'error');
+                return;
+            }
+            showStatus('Gerando PDF...');
+
+            const mapElement = document.getElementById('map');
+            const groupStats = {};
+            Object.entries(assignments).forEach(([name, group]) => {
+                if (!groupStats[group]) groupStats[group] = [];
+                groupStats[group].push(name);
+            });
+
+            try {
+                const logoPromise = loadImageDataURL('assets/logo_raio.png');
+                if (map && typeof map.invalidateSize === 'function') {
+                    map.invalidateSize();
+                    await new Promise(resolve => setTimeout(resolve, 250));
+                }
+                const canvas = await html2canvas(mapElement, { useCORS: true, scale: 2, backgroundColor: '#f5f5f5' });
+                const logoDataUrl = await logoPromise;
+
+                const pdf = new jsPDF('landscape', 'mm', 'a4');
+                const pageWidth = pdf.internal.pageSize.getWidth();
+                const pageHeight = pdf.internal.pageSize.getHeight();
+                const margin = 14;
+                const headerBandHeight = 26;
+                const contentTop = headerBandHeight + 12;
+                const now = new Date();
+
+                const drawHeader = () => {
+                    pdf.setFillColor(15, 78, 168);
+                    pdf.rect(0, 0, pageWidth, headerBandHeight, 'F');
+                    if (logoDataUrl) {
+                        pdf.addImage(logoDataUrl, 'PNG', margin, 4, 18, 18);
+                    }
+                    pdf.setTextColor(255, 255, 255);
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.setFontSize(18);
+                    pdf.text('CPRAIO - Distribuição Territorial', margin + 22, 15);
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.setFontSize(10);
+                    const timestamp = `Gerado em: ${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR')}`;
+                    const textWidth = pdf.getTextWidth(timestamp);
+                    pdf.text(timestamp, pageWidth - margin - textWidth, 17);
+                    pdf.setTextColor(0, 0, 0);
+                    pdf.setDrawColor(220);
+                    pdf.setLineWidth(0.2);
+                    pdf.line(margin, headerBandHeight + 4, pageWidth - margin, headerBandHeight + 4);
+                    pdf.setDrawColor(0);
+                    pdf.setLineWidth(0.1);
+                };
+
+                drawHeader();
+
+                const ratio = canvas.height / canvas.width;
+                const availableWidth = pageWidth - margin * 2;
+                const panelHeight = pageHeight - contentTop - margin;
+                const gap = 12;
+                const minSummaryWidth = 88;
+                const maxMapWidthByHeight = panelHeight / ratio;
+
+                let mapWidth = Math.min(availableWidth - minSummaryWidth - gap, maxMapWidthByHeight);
+                mapWidth = Math.max(mapWidth, Math.min(maxMapWidthByHeight, availableWidth * 0.62));
+                let mapHeight = mapWidth * ratio;
+
+                if (mapHeight > panelHeight) {
+                    mapHeight = panelHeight;
+                    mapWidth = mapHeight / ratio;
+                }
+
+                let summaryWidth = availableWidth - mapWidth - gap;
+                if (summaryWidth < minSummaryWidth) {
+                    summaryWidth = minSummaryWidth;
+                    mapWidth = availableWidth - summaryWidth - gap;
+                    mapWidth = Math.min(mapWidth, maxMapWidthByHeight);
+                    mapHeight = mapWidth * ratio;
+                }
+
+                if (mapHeight > panelHeight) {
+                    mapHeight = panelHeight;
+                    mapWidth = mapHeight / ratio;
+                    summaryWidth = availableWidth - mapWidth - gap;
+                }
+
+                const summaryY = contentTop;
+                const mapX = margin;
+                const mapY = summaryY;
+                const summaryX = margin + mapWidth + gap;
+
+                const imgData = canvas.toDataURL('image/png');
+                pdf.addImage(imgData, 'PNG', mapX, mapY, mapWidth, mapHeight);
+                pdf.setDrawColor(200);
+                pdf.setLineWidth(0.3);
+                pdf.rect(mapX - 1.5, mapY - 1.5, mapWidth + 3, mapHeight + 3);
+                pdf.setDrawColor(0);
+                pdf.setLineWidth(0.1);
+
+                const panelBackgroundHeight = panelHeight;
+                pdf.setFillColor(248, 249, 252);
+                pdf.rect(summaryX - 2, summaryY - 2, summaryWidth + 4, panelBackgroundHeight, 'F');
+                pdf.setDrawColor(210, 214, 220);
+                pdf.rect(summaryX - 2, summaryY - 2, summaryWidth + 4, panelBackgroundHeight);
+                pdf.setDrawColor(0);
+
+                let infoX = summaryX + 6;
+                let infoY = summaryY + 12;
+                let infoWidth = summaryWidth - 12;
+
+                const summaryBottom = summaryY + panelBackgroundHeight - 10;
+
+                const ensureSpace = (spaceNeeded = 6) => {
+                    if (infoY + spaceNeeded > summaryBottom) {
+                        pdf.addPage();
+                        drawHeader();
+                        pdf.setFillColor(248, 249, 252);
+                        pdf.rect(margin - 2, contentTop - 2, pageWidth - margin * 2 + 4, panelBackgroundHeight, 'F');
+                        pdf.setDrawColor(210, 214, 220);
+                        pdf.rect(margin - 2, contentTop - 2, pageWidth - margin * 2 + 4, panelBackgroundHeight);
+                        pdf.setDrawColor(0);
+                        infoX = margin + 6;
+                        infoY = contentTop + 12;
+                        infoWidth = pageWidth - margin * 2 - 12;
+                    }
+                };
+
+                const writeSectionTitle = title => {
+                    ensureSpace(12);
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.setFontSize(12);
+                    pdf.text(title, infoX, infoY);
+                    infoY += 5;
+                    pdf.setDrawColor(220, 223, 227);
+                    pdf.setLineWidth(0.1);
+                    pdf.line(infoX, infoY, infoX + infoWidth, infoY);
+                    infoY += 4;
+                    pdf.setDrawColor(0);
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.setFontSize(9.5);
+                };
+
+                const writeLines = (text, indent = 0) => {
+                    const lines = pdf.splitTextToSize(text, infoWidth - indent);
+                    lines.forEach(line => {
+                        ensureSpace(5);
+                        pdf.text(line, infoX + indent, infoY);
+                        infoY += 5;
+                    });
+                };
+
+                const drawColorLabel = (colorHex, labelText) => {
+                    const lines = pdf.splitTextToSize(labelText, infoWidth - 18);
+                    const [r, g, b] = hexToRgb(colorHex);
+                    ensureSpace(6 + (lines.length - 1) * 4);
+                    pdf.setFillColor(r, g, b);
+                    pdf.rect(infoX, infoY - 3.5, 6, 6, 'F');
+                    pdf.text(lines[0], infoX + 10, infoY);
+                    for (let i = 1; i < lines.length; i++) {
+                        infoY += 4;
+                        pdf.text(lines[i], infoX + 10, infoY);
+                    }
+                    infoY += 6;
+                };
+
+                const groupEntries = Object.entries(groupStats).sort((a, b) => Number(a[0]) - Number(b[0]));
+
+                writeSectionTitle('Resumo Operacional');
+                if (groupEntries.length === 0) {
+                    writeLines('Nenhum município pintado.');
+                } else {
+                    groupEntries.forEach(([group, muns]) => {
+                        ensureSpace(9);
+                        const countLabel = `${formatBattalionLabel(group)} — ${muns.length} ${muns.length === 1 ? 'município' : 'municípios'}`;
+                        pdf.setFont('helvetica', 'bold');
+                        pdf.text(countLabel, infoX, infoY);
+                        pdf.setFont('helvetica', 'normal');
+                        infoY += 4;
+                        const ordered = muns.slice().sort();
+                        const munLines = pdf.splitTextToSize(ordered.join(', '), infoWidth - 4);
+                        munLines.forEach(line => {
+                            ensureSpace(4);
+                            pdf.text(`• ${line}`, infoX + 2, infoY);
+                            infoY += 4;
+                        });
+                        infoY += 3;
+                    });
+                }
+
+                writeSectionTitle('Legenda de Cores');
+                for (let i = 1; i <= 5; i++) {
+                    const color = document.getElementById(`color${i}`).value;
+                    drawColorLabel(color, formatBattalionLabel(i));
+                }
+
+                writeSectionTitle('Batalhões Fixos');
+                FIXED_BATTALIONS.forEach(({ label, group }) => {
+                    const color = document.getElementById(`color${group}`).value;
+                    drawColorLabel(color, label);
+                });
+
+                pdf.save('mapa_ceara_cpraio.pdf');
+                showStatus('PDF baixado com sucesso!');
+            } catch (error) {
+                console.error('Erro ao gerar PDF:', error);
+                showStatus('Erro ao gerar PDF', 'error');
+            }
+        }
+        
+        document.addEventListener('DOMContentLoaded', initMap);
+</script>
+</body>
+</html>
