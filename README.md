@@ -52,3 +52,4 @@ Scripts auxiliares:
 
 - O cache dos GeoJSON acelera a abertura. Limpe com “Rerun”/“Clear cache” se trocar os arquivos.
 - Os nomes de município são obtidos a partir de múltiplas chaves comuns no GeoJSON.
+# raio_territorio
