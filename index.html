@@ -85,6 +85,20 @@
                 </div>
 
                 <div class="control-panel">
+                    <h4>🔍 Filtro de Exibição</h4>
+                    <label for="filterGroup" style="margin-bottom: 6px; display:block;">Batalhão visível:</label>
+                    <select id="filterGroup" style="width:100%; padding:8px 10px; border-radius:6px; border:1px solid #c5d2e8; font-size:14px;">
+                        <option value="all">Todos os batalhões</option>
+                        <option value="1">1º BPRAIO</option>
+                        <option value="2">2º BPRAIO</option>
+                        <option value="3">3º BPRAIO</option>
+                        <option value="4">4º BPRAIO</option>
+                        <option value="5">5º BPRAIO</option>
+                    </select>
+                    <span class="hint">Escolha um batalhão para destacar apenas sua área de cobertura no mapa.</span>
+                </div>
+
+                <div class="control-panel">
                     <h3 class="section-title"><img src="assets/logo_raio.png" class="icon-raio" alt="">Distribuição RAIO no Terreno</h3>
                     <span class="hint">Clique no mapa para pintar o município com o grupo ativo. Use o modo edição para remover uma cor.</span>
 
@@ -127,7 +141,8 @@
             battalions = {},
             battalionMarkers = {},
             activeGroup = 1,
-            editMode = false;
+            editMode = false,
+            filterGroup = 'all';
 
         const lockedMunicipalities = new Set();
 
@@ -349,6 +364,7 @@
                 updatePaintedMunicipalities();
                 updateStats();
                 updateMunicipalityList();
+                updateBattalionMarkers();
             }
         }
 
@@ -406,6 +422,7 @@
                 initializeFixedBattalions();
                 applyInitialAssignments();
                 restoreState();
+                updateBattalionMarkers();
             } catch (error) {
                 console.error('Erro ao carregar municípios:', error);
                 showStatus('Erro ao carregar dados', 'error');
@@ -445,7 +462,8 @@
                     icon: def.icon || 'shield',
                     fileName: null,
                     fileUrl: null,
-                    displayName: def.label
+                    displayName: def.label,
+                    group: def.group
                 };
 
                 addBattalionMarker(resolvedName);
@@ -488,6 +506,7 @@
                 updatePaintedMunicipalities();
                 updateStats();
                 updateMunicipalityList();
+                updateBattalionMarkers();
                 showStatus('Municípios dos BPRAIOs pré-coloridos automaticamente.');
             }
         }
@@ -499,6 +518,21 @@
                     updateLegend();
                     updatePaintedMunicipalities();
                     persistState();
+                    updateStats();
+                });
+            }
+
+            const filterSelect = document.getElementById('filterGroup');
+            if (filterSelect) {
+                filterSelect.addEventListener('change', e => {
+                    const value = e.target.value;
+                    filterGroup = value === 'all' ? 'all' : Number(value);
+                    updatePaintedMunicipalities();
+                    updateBattalionMarkers();
+                    updateStats();
+                    updateMunicipalityList();
+                    const label = value === 'all' ? 'Todos os batalhões' : formatBattalionLabel(filterGroup);
+                    showStatus(`Filtro aplicado: ${label}`);
                 });
             }
 
@@ -529,6 +563,10 @@
         }
         
         function handleMunicipalityClick(name) {
+            if (lockedMunicipalities.has(name)) {
+                showStatus(`${name} é uma base fixa do ${formatBattalionLabel(assignments[name])}.`, 'error');
+                return;
+            }
             if (editMode) {
                 removeMunicipality(name);
                 return;
@@ -537,14 +575,19 @@
         }
         
         function paintMunicipality(name, group) {
+            if (lockedMunicipalities.has(name)) {
+                showStatus(`${name} não pode ser alterado.`, 'error');
+                return;
+            }
             assignments[name] = group;
             updatePaintedMunicipalities();
             updateStats();
             updateMunicipalityList();
             showStatus(`${name} pintado com ${formatBattalionLabel(group)}`);
             persistState();
+            updateBattalionMarkers();
         }
-        
+
         function addBattalionMarker(name) {
             if (!battalions[name]) return;
 
@@ -565,14 +608,32 @@
             battalionMarkers[name] = marker;
         }
 
+        function updateBattalionMarkers() {
+            if (!map) return;
+            Object.entries(battalionMarkers).forEach(([name, marker]) => {
+                const data = battalions[name];
+                if (!data) return;
+                const group = Number(data.group);
+                const shouldShow = filterGroup === 'all' || (Number.isFinite(group) && group === filterGroup);
+                const onMap = map.hasLayer(marker);
+                if (shouldShow && !onMap) {
+                    marker.addTo(map);
+                } else if (!shouldShow && onMap) {
+                    map.removeLayer(marker);
+                }
+            });
+        }
+
         function updatePaintedMunicipalities() {
             map.eachLayer(layer => { if (layer.options && layer.options.isPainted) map.removeLayer(layer); });
             Object.entries(assignments).forEach(([name, group]) => {
                 const feature = municipalities[name];
                 if (feature) {
-                    const baseColor = document.getElementById(`color${group}`)?.value || '#666666';
+                    const numericGroup = Number(group);
+                    if (filterGroup !== 'all' && numericGroup !== filterGroup) return;
+                    const baseColor = document.getElementById(`color${numericGroup}`)?.value || '#666666';
                     const isLocked = lockedMunicipalities.has(name);
-                    const fillColor = isLocked ? baseColor : lightenColor(baseColor, 0.4);
+                    const fillColor = isLocked ? baseColor : lightenColor(baseColor, 0.45);
                     const fillOpacity = isLocked ? 0.75 : 0.55;
                     const paintedLayer = L.geoJSON(feature, {
                         style: {fillColor, color: baseColor, weight: 1.2, fillOpacity},
@@ -583,7 +644,7 @@
                 }
             });
         }
-        
+
         function updateLegend() {
             const legendContent = document.getElementById('legendContent');
             legendContent.innerHTML = '';
@@ -605,8 +666,12 @@
                 groupStats[numericGroup].push(name);
             });
 
+            const groupsToRender = filterGroup === 'all'
+                ? [1, 2, 3, 4, 5]
+                : [Number(filterGroup)].filter(Number.isFinite);
+
             let html = '';
-            for (let group = 1; group <= 5; group++) {
+            groupsToRender.forEach(group => {
                 const colorInput = document.getElementById(`color${group}`);
                 const color = colorInput ? colorInput.value : '#0f4ea8';
                 const municipalitiesList = (groupStats[group] || []).slice().sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -633,9 +698,9 @@
                         ${tags || '<span class="stat-tag">Sem municípios atribuídos</span>'}
                     </div>
                 </div>`;
-            }
+            });
 
-            statsContent.innerHTML = html;
+            statsContent.innerHTML = html || '<div class="stats-group"><div class="stats-header"><h5>Nenhum batalhão filtrado</h5></div><div class="stats-tags"><span class="stat-tag">Sem dados</span></div></div>';
         }
 
         function showStatus(message, type = 'info') {
@@ -680,7 +745,10 @@
         
         function updateMunicipalityList() {
             const list = document.getElementById('municipalityList');
-            const entries = Object.entries(assignments);
+            const entries = Object.entries(assignments).filter(([_, group]) => {
+                const numericGroup = Number(group);
+                return filterGroup === 'all' || numericGroup === filterGroup;
+            });
             
             if (entries.length === 0) {
                 list.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">Nenhum município pintado</div>';
@@ -689,12 +757,14 @@
             
             list.innerHTML = entries.map(([name, group]) => {
                 const locked = lockedMunicipalities.has(name);
+                const colorInput = document.getElementById(`color${group}`);
+                const itemColor = colorInput ? colorInput.value : '#666666';
                 const removeButton = locked
                     ? '<span style="float: right; color: #999; font-size: 12px;">fixo</span>'
                     : `<button class="remove-btn" onclick="removeMunicipality('${name}')">×</button>`;
                 return `
                 <div class="municipality-item">
-                    <span style="display: inline-block; width: 15px; height: 15px; background: ${document.getElementById(`color${group}`).value}; margin-right: 8px; border-radius: 2px;"></span>
+                    <span style="display: inline-block; width: 15px; height: 15px; background: ${itemColor}; margin-right: 8px; border-radius: 2px;"></span>
                     ${name} (${formatBattalionLabel(group)})
                     ${removeButton}
                 </div>
