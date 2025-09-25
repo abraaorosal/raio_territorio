@@ -50,6 +50,18 @@
         .remove-btn { background: #f44336; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; float: right; }
         .hint { display: block; font-size: 13px; color: #555; margin-top: 8px; line-height: 1.4; }
         .battalion-marker { font-size: 22px; line-height: 22px; text-align: center; }
+        .battalion-marker-image { border-radius: 50%; border: 2px solid rgba(15, 78, 168, 0.7); background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
+        .stats-group { background: #ffffff; border-radius: 10px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(15,78,168,0.12); border: 1px solid rgba(15,78,168,0.08); }
+        .stats-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .stats-header h5 { margin: 0; font-size: 16px; color: #0f4ea8; }
+        .stats-header span { font-size: 12px; color: #4a4a4a; }
+        .stats-color { width: 14px; height: 14px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15); }
+        .stats-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+        .stat-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 999px; font-size: 12px; background: rgba(15,78,168,0.08); color: #153057; border: 1px solid rgba(15,78,168,0.12); }
+        .stat-tag.fixed { background: rgba(33,150,83,0.12); border-color: rgba(33,150,83,0.2); color: #1b5e20; }
+        .stat-tag.fixed::before { content: '✓'; font-size: 11px; }
+        .stat-tag.dynamic { background: rgba(255, 193, 7, 0.15); border-color: rgba(255, 193, 7, 0.35); color: #7a4f00; }
+        .stat-tag.dynamic::before { content: '+'; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -168,12 +180,13 @@
             }
         }
 
-        const BATTALION_ICONS = {
-            star: '⭐',
-            shield: '🛡️',
-            flag: '🚩',
-            info: 'ℹ️'
-        };
+        const BATTALION_MARKER_ICON = L.icon({
+            iconUrl: 'assets/logo_raio.png',
+            iconSize: [34, 34],
+            iconAnchor: [17, 17],
+            popupAnchor: [0, -18],
+            className: 'battalion-marker-image'
+        });
 
         const FIXED_BATTALIONS = [
             { municipality: 'Fortaleza', label: '1º BPRAIO (Fortaleza)', icon: 'shield', group: 1 },
@@ -263,6 +276,17 @@
                 (value >> 8) & 255,
                 value & 255
             ];
+        }
+
+        function lightenColor(hex, factor = 0.35) {
+            const [r, g, b] = hexToRgb(hex);
+            const clamp = value => Math.max(0, Math.min(255, Math.round(value)));
+            const mix = channel => clamp(channel + (255 - channel) * factor);
+            const toHex = channel => channel.toString(16).padStart(2, '0');
+            const nr = mix(r);
+            const ng = mix(g);
+            const nb = mix(b);
+            return `#${toHex(nr)}${toHex(ng)}${toHex(nb)}`;
         }
 
         function formatBattalionLabel(group) {
@@ -529,9 +553,8 @@
             }
 
             const data = battalions[name];
-            const iconHtml = BATTALION_ICONS[data.icon] || '🏛️';
             const marker = L.marker(data.latlng, {
-                icon: L.divIcon({className: 'battalion-marker', html: iconHtml, iconSize: [30, 30]})
+                icon: BATTALION_MARKER_ICON
             }).addTo(map);
 
             const fileInfo = data.fileName && data.fileUrl
@@ -547,9 +570,12 @@
             Object.entries(assignments).forEach(([name, group]) => {
                 const feature = municipalities[name];
                 if (feature) {
-                    const color = document.getElementById(`color${group}`).value;
+                    const baseColor = document.getElementById(`color${group}`)?.value || '#666666';
+                    const isLocked = lockedMunicipalities.has(name);
+                    const fillColor = isLocked ? baseColor : lightenColor(baseColor, 0.4);
+                    const fillOpacity = isLocked ? 0.75 : 0.55;
                     const paintedLayer = L.geoJSON(feature, {
-                        style: {fillColor: color, color: color, weight: 1.2, fillOpacity: 0.7},
+                        style: {fillColor, color: baseColor, weight: 1.2, fillOpacity},
                         interactive: false
                     });
                     paintedLayer.options.isPainted = true;
@@ -571,26 +597,45 @@
         
         function updateStats() {
             const statsContent = document.getElementById('statsContent');
-            let html = '';
             const groupStats = {};
             Object.entries(assignments).forEach(([name, group]) => {
-                if (!groupStats[group]) groupStats[group] = [];
-                groupStats[group].push(name);
+                const numericGroup = Number(group);
+                if (!Number.isFinite(numericGroup)) return;
+                if (!groupStats[numericGroup]) groupStats[numericGroup] = [];
+                groupStats[numericGroup].push(name);
             });
-            Object.entries(groupStats).forEach(([group, muns]) => {
-                html += `<div><strong>${formatBattalionLabel(group)}:</strong> ${muns.length} ${muns.length === 1 ? 'município' : 'municípios'}</div>`;
-            });
-            const battalionEntries = Object.entries(battalions);
-            if (battalionEntries.length > 0) {
-                html += `<div><strong>Batalhões:</strong> ${battalionEntries.length} marcados</div>`;
-                const names = battalionEntries
-                    .map(([, data]) => data.displayName || '')
-                    .filter(Boolean);
-                if (names.length > 0) {
-                    html += `<div style="margin-left: 10px; font-size: 13px; color: #333;">${names.join(', ')}</div>`;
-                }
+
+            let html = '';
+            for (let group = 1; group <= 5; group++) {
+                const colorInput = document.getElementById(`color${group}`);
+                const color = colorInput ? colorInput.value : '#0f4ea8';
+                const municipalitiesList = (groupStats[group] || []).slice().sort((a, b) => a.localeCompare(b, 'pt-BR'));
+                const count = municipalitiesList.length;
+
+                const tags = municipalitiesList.map(name => {
+                    const isFixed = lockedMunicipalities.has(name);
+                    const cls = isFixed ? 'fixed' : 'dynamic';
+                    return `<span class="stat-tag ${cls}">${name}</span>`;
+                }).join('');
+
+                const countLabel = count === 0 ? 'Nenhum município' : `${count} ${count === 1 ? 'município' : 'municípios'}`;
+
+                html += `
+                <div class="stats-group">
+                    <div class="stats-header">
+                        <span class="stats-color" style="background:${color}"></span>
+                        <div>
+                            <h5>${formatBattalionLabel(group)}</h5>
+                            <span>${countLabel}</span>
+                        </div>
+                    </div>
+                    <div class="stats-tags">
+                        ${tags || '<span class="stat-tag">Sem municípios atribuídos</span>'}
+                    </div>
+                </div>`;
             }
-            statsContent.innerHTML = html || 'Nenhum município pintado';
+
+            statsContent.innerHTML = html;
         }
 
         function showStatus(message, type = 'info') {
