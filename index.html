@@ -9,7 +9,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
+        :root { --header-height: 72px; }
         body { margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background: #f5f5f5; }
+        body.sidebar-open { overflow: hidden; }
         .container { display: flex; height: 100vh; transition: all 0.3s ease; }
         .sidebar { width: 350px; max-width: 90vw; background: white; box-shadow: 2px 0 12px rgba(0,0,0,0.12); padding: 0; overflow: hidden; transition: width 0.3s ease, box-shadow 0.3s ease; display: flex; flex-direction: column; }
         .sidebar-content { padding: 20px; overflow-y: auto; height: 100%; transition: opacity 0.2s ease, transform 0.2s ease; }
@@ -22,22 +24,35 @@
         .color-picker { width: 40px; height: 30px; border: none; border-radius: 4px; cursor: pointer; }
         .legend { position: absolute; bottom: 20px; left: 20px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: 1000; }
         .status { position: absolute; top: 20px; right: 20px; background: #4caf50; color: white; padding: 10px 15px; border-radius: 5px; z-index: 1000; display: none; }
-        .header { background: #0f4ea8; color: white; padding: 14px 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); display: flex; align-items: center; justify-content: space-between; }
+        .header { background: #0f4ea8; color: white; padding: 14px 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 1200; height: var(--header-height); box-sizing: border-box; }
         .header-left { display: flex; align-items: center; gap: 14px; }
         .header h1 { margin: 0; font-size: 22px; font-weight: 600; }
         .logo { width: 56px; height: 56px; border-radius: 50%; object-fit: contain; }
         .hamburger { background: rgba(255,255,255,0.15); border: none; color: white; width: 46px; height: 46px; border-radius: 12px; font-size: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.25s ease; }
         .hamburger:hover { background: rgba(255,255,255,0.25); }
         .hamburger.active { background: rgba(0,0,0,0.25); }
+        .sidebar-backdrop { position: fixed; top: var(--header-height); left: 0; width: 100%; height: calc(100vh - var(--header-height)); background: rgba(13, 24, 46, 0.34); backdrop-filter: blur(2px); opacity: 0; pointer-events: none; transition: opacity 0.25s ease; z-index: 1100; }
+        .sidebar-backdrop.visible { opacity: 1; pointer-events: auto; }
+
         @media (max-width: 900px) {
+            :root { --header-height: 68px; }
             .header h1 { font-size: 18px; }
             .logo { width: 48px; height: 48px; }
+            #appLayout.sidebar-collapsed .sidebar { width: 320px; max-width: 88vw; }
         }
         @media (max-width: 720px) {
             .container { flex-direction: column; height: auto; }
-            .sidebar { width: 100%; max-width: 100%; box-shadow: none; border-radius: 0; }
-            #appLayout.sidebar-collapsed .sidebar { width: 0; }
-            .map-container { min-height: 60vh; }
+            .map-container { min-height: calc(100vh - var(--header-height)); }
+            #map { min-height: calc(100vh - var(--header-height)); }
+            .sidebar { position: fixed; top: var(--header-height); left: 0; width: 100%; max-width: 100%; height: calc(100vh - var(--header-height)); box-shadow: none; border-radius: 0; transform: translateX(0); transition: transform 0.3s ease, box-shadow 0.3s ease; z-index: 1201; }
+            #appLayout.sidebar-collapsed .sidebar { transform: translateX(-104%); box-shadow: none; width: 100%; }
+            #appLayout.sidebar-open .sidebar { transform: translateX(0); box-shadow: 2px 0 14px rgba(0,0,0,0.25); }
+            #appLayout.sidebar-collapsed .sidebar-content { opacity: 1; transform: none; pointer-events: none; }
+            #appLayout.sidebar-open .sidebar-content { pointer-events: auto; }
+            .sidebar-content { padding: 18px 18px 80px; }
+            .legend { left: auto; right: 16px; bottom: 100px; }
+            .status { top: auto; bottom: 20px; right: 16px; }
+            .download-btn, .edit-mode, #activeGroup, #filterGroup { width: 100%; }
         }
         .section-title { display: flex; align-items: center; gap: 10px; margin: 0 0 12px 0; font-size: 18px; }
         .icon-raio { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
@@ -72,6 +87,7 @@
             <h1>CPRAIO - Distribuição Territorial</h1>
         </div>
     </div>
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
     <div class="container" id="appLayout">
         <div class="sidebar">
             <div class="sidebar-content">
@@ -519,10 +535,16 @@
                     updatePaintedMunicipalities();
                     persistState();
                     updateStats();
+                    updateBattalionMarkers();
                 });
             }
 
             const filterSelect = document.getElementById('filterGroup');
+            const layout = document.getElementById('appLayout');
+            const toggle = document.getElementById('sidebarToggle');
+            const backdrop = document.getElementById('sidebarBackdrop');
+            const mobileQuery = window.matchMedia('(max-width: 720px)');
+            let setButtonState = () => {};
             if (filterSelect) {
                 filterSelect.addEventListener('change', e => {
                     const value = e.target.value;
@@ -533,17 +555,39 @@
                     updateMunicipalityList();
                     const label = value === 'all' ? 'Todos os batalhões' : formatBattalionLabel(filterGroup);
                     showStatus(`Filtro aplicado: ${label}`);
+                    if (layout && mobileQuery.matches) {
+                        layout.classList.add('sidebar-collapsed');
+                        setButtonState(true);
+                    }
                 });
             }
 
-            const toggle = document.getElementById('sidebarToggle');
-            const layout = document.getElementById('appLayout');
             if (toggle) {
                 toggle.innerHTML = '☰';
-                const setButtonState = collapsed => {
+                setButtonState = collapsed => {
                     toggle.classList.toggle('active', !collapsed);
                     toggle.setAttribute('aria-expanded', (!collapsed).toString());
                     toggle.setAttribute('aria-label', collapsed ? 'Abrir menu lateral' : 'Fechar menu lateral');
+                    const isMobile = mobileQuery.matches;
+                    if (layout) {
+                        if (!collapsed && isMobile) {
+                            layout.classList.add('sidebar-open');
+                        } else {
+                            layout.classList.remove('sidebar-open');
+                        }
+                    }
+                    if (backdrop) {
+                        if (!collapsed && isMobile) {
+                            backdrop.classList.add('visible');
+                        } else {
+                            backdrop.classList.remove('visible');
+                        }
+                    }
+                    if (!collapsed && isMobile) {
+                        document.body.classList.add('sidebar-open');
+                    } else {
+                        document.body.classList.remove('sidebar-open');
+                    }
                 };
 
                 const initialCollapsed = window.innerWidth <= 900;
@@ -558,6 +602,22 @@
                     const collapsedNow = layout.classList.toggle('sidebar-collapsed');
                     setButtonState(collapsedNow);
                     setTimeout(() => { if (map && typeof map.invalidateSize === 'function') map.invalidateSize(); }, 320);
+                });
+
+                if (backdrop) {
+                    backdrop.addEventListener('click', () => {
+                        if (!layout) return;
+                        layout.classList.add('sidebar-collapsed');
+                        setButtonState(true);
+                        setTimeout(() => { if (map && typeof map.invalidateSize === 'function') map.invalidateSize(); }, 320);
+                    });
+                }
+            }
+
+            if (mobileQuery) {
+                mobileQuery.addEventListener('change', () => {
+                    const collapsed = layout ? layout.classList.contains('sidebar-collapsed') : true;
+                    setButtonState(collapsed);
                 });
             }
         }
@@ -606,6 +666,7 @@
             const label = data.displayName || name;
             marker.bindPopup(`<b>Batalhão:</b> ${label}${fileInfo}`);
             battalionMarkers[name] = marker;
+            updateBattalionMarkers();
         }
 
         function updateBattalionMarkers() {
